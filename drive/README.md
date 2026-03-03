@@ -1,44 +1,16 @@
-# Obot Google Drive MCP Server
+# Google Drive MCP Server
 
-## Installation & Running
+An MCP server for Google Drive integration, providing comprehensive file and folder management capabilities.
 
-### Docker-compose
-Export (Google's) Oauth CLient ID and Secret for Oauth Proxy
-```bash
-export OAUTH_CLIENT_ID=xxx
-export OAUTH_CLIENT_SECRET=xxx
-```
+## Features
 
-then:
-```bash
-docker-compose up
-```
+- List, get, copy, update, and delete files with advanced filtering and search
+- Create and organize folder hierarchies in personal and shared drives
+- Comprehensive permission management with role-based access and sharing
+- Transfer file ownership to users within the same domain
+- Filter files by MIME type, name, modification time, and folder location
+- Full management of shared drives including creation, deletion, and renaming
 
-### Using uvx
-install from local directory:
-```bash
-uvx --from . obot-google-drive-mcp
-```
+## Usage
 
-### Option 2: Using uv (Development)
-Install dependencies:
-```bash
-uv pip install
-```
-
-Run the server:
-```bash
-uv run server.py
-```
-
-## Testing
-
-### Unit-test with pytest
-```
-uv run python -m pytest
-```
-
-### Integration Testing
-
-#### Get Your Access Token
-This MCP server assumes Obot will take care of the Oauth2.0 flow and supply an access token. To test locally or without Obot, you need to get an access token by yourself. I use [postman workspace](https://blog.postman.com/how-to-access-google-apis-using-oauth-in-postman/) to create and manage my tokens.
+This MCP server is designed to run as part of [Obot](https://github.com/obot-platform/obot/). You can run Obot yourself or try it out on our free demo environment at [chat.obot.ai](https://chat.obot.ai).

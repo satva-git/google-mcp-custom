@@ -1,55 +1,17 @@
-# Obot Google Calendar MCP Server
+# Google Calendar MCP Server
 
-- supports streamable HTTP and stdio
+An MCP server for Google Calendar integration, providing comprehensive calendar and event management capabilities.
 
-## Installation & Running
+## Features
 
-### Docker-compose (Recommended)
-Export (Google's) Oauth CLient ID and Secret for Oauth Proxy
-```bash
-export OAUTH_CLIENT_ID=xxx
-export OAUTH_CLIENT_SECRET=xxx
-```
+- List, create, update, and delete calendars with timezone and location support
+- Full CRUD operations for events with support for all-day and timed events
+- Create and manage recurring events using RFC5545 RRULE patterns
+- Add, replace, and manage event attendees with RSVP tracking
+- Accept, decline, or tentatively respond to calendar invitations
+- Create events from natural language text descriptions
+- Move events between different calendars
 
-then:
-```bash
-docker-compose up
-```
+## Usage
 
-### Using uvx 
-install from local directory:
-```bash
-uvx --from . google-calendar-mcp
-```
-
-### Using uv (Development)
-Install dependencies:
-```bash
-uv pip install
-```
-
-Run the server:
-```bash
-uv run server.py
-```
-
-## Testing
-
-### Unit-test with pytest
-```bash
-uv run python -m pytest
-```
-
-### Integration Testing
-
-#### Get Your Access Token
-This MCP server assumes Obot will take care of the Oauth2.0 flow and supply an access token. To test locally or without Obot, you need to get an access token by yourself. I use [postman workspace](https://blog.postman.com/how-to-access-google-apis-using-oauth-in-postman/) to create and manage my tokens.
-
-#### Local Example Client
-```
-export GOOGLE_OAUTH_TOKEN=xxx
-```
-and then
-```
-uv run example_client.py
-```
+This MCP server is designed to run as part of [Obot](https://github.com/obot-platform/obot/). You can run Obot yourself or try it out on our free demo environment at [chat.obot.ai](https://chat.obot.ai).

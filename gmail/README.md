@@ -1,67 +1,15 @@
-# Obot Gmail MCP Server
-- Obot Gmail mcp server, converted from the google-gmail tool bundle.
-- supports streamable HTTP
-- tools of this mcp server expect `cred_token`(access_token of google oauth) as part of the tool input.
+# Gmail MCP Server
 
-## Installation
+An MCP server for Gmail integration, providing comprehensive email management capabilities.
 
-### Docker-compose
-Export (Google's) Oauth CLient ID and Secret for Oauth Proxy
-```bash
-export OAUTH_CLIENT_ID=xxx
-export OAUTH_CLIENT_SECRET=xxx
-```
+## Features
 
-then:
-```bash
-docker-compose up
-```
+- Read, send, draft, and organize emails with advanced filtering
+- Create, update, and manage Gmail labels
+- Powerful query-based email filtering and search
+- List and manage email attachments
+- Create, update, send, and delete draft emails
 
+## Usage
 
-### Using uvx
-```bash
-# Run directly from the current directory
-uvx --from . obot-gmail-mcp
-```
-or stdio server:
-```
-uvx --from . obot-gmail-mcp-stdio
-```
-
-### Using uv (development)
-```bash
-uv pip install -e .
-```
-
-## Run the Server
-
-### Using uvx
-```bash
-uvx --from . obot-gmail-mcp
-```
-
-### Using uv
-```bash
-uv run server.py
-```
-
-## Testing
-
-### Unit-test with pytest
-```
-uv run python -m pytest
-```
-
-### Integration Testing
-
-#### Get Your Access Token
-This MCP server assumes Obot will take care of the Oauth2.0 flow and supply an access token. To test locally or without Obot, you need to get an access token by yourself. I use [postman workspace](https://blog.postman.com/how-to-access-google-apis-using-oauth-in-postman/) to create and manage my tokens.
-
-#### Local Example Client
-```
-export GOOGLE_OAUTH_TOKEN=xxx
-```
-and then
-```
-uv run example_client.py
-```
+This MCP server is designed to run as part of [Obot](https://github.com/obot-platform/obot/). You can run Obot yourself or try it out on our free demo environment at [chat.obot.ai](https://chat.obot.ai).
