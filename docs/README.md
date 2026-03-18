@@ -47,7 +47,7 @@ docker compose up --build
 ## API Scopes Required
 
 - `https://www.googleapis.com/auth/documents` — Full access to Google Docs
-- `https://www.googleapis.com/auth/drive.readonly` — Read-only access to Drive (for listing documents)
+- `https://www.googleapis.com/auth/drive` — Access to Drive (for listing documents)
 
 ## Running Tests
 

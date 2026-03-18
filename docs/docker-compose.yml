@@ -24,7 +24,7 @@ services:
     image: ghcr.io/obot-platform/mcp-oauth-proxy:master
     environment:
       DATABASE_DSN: "postgres://oauth_user:oauth_password@postgres_oauth:5432/oauth_proxy?sslmode=disable"
-      SCOPES_SUPPORTED: "openid,profile,email,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive.readonly"
+      SCOPES_SUPPORTED: "openid,profile,email,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive"
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       OAUTH_AUTHORIZE_URL: "https://accounts.google.com"
