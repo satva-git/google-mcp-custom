@@ -17,6 +17,7 @@ from .apis.documents import (
     insert_table,
     list_documents,
     batch_update,
+    export_document,
 )
 from fastmcp.server.dependencies import get_http_headers
 from .apis.helper import get_client
@@ -415,6 +416,43 @@ def batch_update_document_tool(
         return result
     except HttpError as error:
         raise ToolError(f"Failed to batch update document, HttpError: {error}") from error
+    except Exception as error:
+        raise ToolError(f"Unexpected ToolError: {error}") from error
+
+
+@mcp.tool(
+    name="export_document",
+    annotations={
+        "readOnlyHint": True,
+    },
+)
+def export_document_tool(
+    document_id: Annotated[
+        str, Field(description="ID of the Google Docs document to export")
+    ],
+    export_format: Annotated[
+        str,
+        Field(
+            description="Export format: 'html' (includes images as base64), 'pdf', 'docx', 'txt', 'rtf', or 'epub'. Defaults to 'html'.",
+            default="html",
+        ),
+    ] = "html",
+) -> dict:
+    """
+    Export a Google Docs document in a specified format using the Drive API.
+    Exporting as HTML preserves embedded images as base64 data URIs, making the
+    output self-contained. This is useful for downloading document content with
+    all images intact.
+    """
+    try:
+        token = _get_access_token()
+        drive_client = get_client(token, service_name="drive", version="v3")
+        result = export_document(drive_client, document_id, export_format)
+        return result
+    except HttpError as error:
+        raise ToolError(f"Failed to export document, HttpError: {error}") from error
+    except ValueError as error:
+        raise ToolError(str(error)) from error
     except Exception as error:
         raise ToolError(f"Unexpected ToolError: {error}") from error
 

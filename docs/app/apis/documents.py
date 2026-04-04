@@ -1,6 +1,77 @@
+from googleapiclient.discovery import Resource
+from googleapiclient.http import MediaIoBaseDownload
+from io import BytesIO
+
 from .helper import setup_logger
 
 logger = setup_logger(__name__)
+
+
+EXPORT_MIME_TYPES = {
+    "html": "text/html",
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "txt": "text/plain",
+    "rtf": "application/rtf",
+    "epub": "application/epub+zip",
+}
+
+
+def export_document(drive_service: Resource, doc_id: str, export_format: str = "html") -> dict:
+    """Export a Google Doc in the specified format using the Drive API.
+
+    When exported as HTML, images embedded in the document are included as
+    base64 data URIs, making the HTML self-contained.
+
+    Args:
+        drive_service: Google Drive API v3 service instance
+        doc_id: ID of the Google Docs document
+        export_format: One of 'html', 'pdf', 'docx', 'txt', 'rtf', 'epub'
+
+    Returns:
+        dict with document_id, file_name, mime_type, and content (str for text
+        formats, base64 for binary formats)
+    """
+    export_format = export_format.lower()
+    mime_type = EXPORT_MIME_TYPES.get(export_format)
+    if not mime_type:
+        supported = ", ".join(EXPORT_MIME_TYPES.keys())
+        raise ValueError(f"Unsupported export format '{export_format}'. Supported: {supported}")
+
+    # Get document metadata for the file name
+    file_meta = drive_service.files().get(
+        fileId=doc_id, fields="name", supportsAllDrives=True
+    ).execute()
+    file_name = file_meta.get("name", doc_id)
+
+    # Export via Drive API
+    request = drive_service.files().export_media(fileId=doc_id, mimeType=mime_type)
+    buf = BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+
+    raw_bytes = buf.getvalue()
+
+    # Text-based formats are returned as string; binary as base64
+    text_formats = {"html", "txt", "rtf"}
+    if export_format in text_formats:
+        content = raw_bytes.decode("utf-8")
+    else:
+        import base64
+        content = base64.b64encode(raw_bytes).decode("ascii")
+
+    extension = f".{export_format}" if export_format != "html" else ".html"
+
+    return {
+        "document_id": doc_id,
+        "file_name": f"{file_name}{extension}",
+        "mime_type": mime_type,
+        "export_format": export_format,
+        "content": content,
+        "size_bytes": len(raw_bytes),
+    }
 
 
 def _convert_text_run(text_run):

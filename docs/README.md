@@ -14,6 +14,7 @@ An MCP (Model Context Protocol) server for interacting with Google Docs. Provide
 - **Set Paragraph Style** — Apply heading styles and alignment
 - **Insert Table** — Add tables at a specific position
 - **Batch Update** — Execute raw Google Docs API batch update requests
+- **Export Document** — Export a document as HTML (with embedded images as base64), PDF, DOCX, TXT, RTF, or EPUB via the Drive API
 
 ## Setup
 

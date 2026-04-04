@@ -271,7 +271,7 @@ def update_file(
         raise ToolError(f"Failed to update file, HttpError: {error_details}")
 
 
-def download_file(service: Resource, file_id: str) -> Tuple[bytes, str]:
+def download_file(service: Resource, file_id: str, export_format: Optional[str] = None) -> Tuple[bytes, str]:
     """
     Download a file's content from Google Drive.
     Files larger than 100MB will not be downloaded.
@@ -279,6 +279,11 @@ def download_file(service: Resource, file_id: str) -> Tuple[bytes, str]:
     Args:
         service: Google Drive API service instance
         file_id: ID of the file to download
+        export_format: Optional export format for Google Workspace files.
+            For Google Docs: 'html', 'pdf', 'docx', 'txt', 'rtf', 'epub'
+            For Google Sheets: 'xlsx', 'pdf', 'csv'
+            For Google Slides: 'pdf', 'pptx'
+            If not specified, defaults to pdf for Docs/Slides and xlsx for Sheets.
 
     Returns:
         Tuple containing file content as bytes and the file name if successful, None otherwise
@@ -301,12 +306,34 @@ def download_file(service: Resource, file_id: str) -> Tuple[bytes, str]:
 
         # Handle Google Workspace files (Docs, Sheets, Slides, etc.)
         if file["mimeType"].startswith("application/vnd.google-apps"):
-            export_formats = {
+            # Default export formats (used when no export_format is specified)
+            default_export_formats = {
                 "application/vnd.google-apps.document": "application/pdf",
                 "application/vnd.google-apps.spreadsheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "application/vnd.google-apps.presentation": "application/pdf",
             }
-            export_mime_type = export_formats.get(file["mimeType"], "application/pdf")
+
+            # Supported export format mappings by file type
+            format_to_mime = {
+                "html": "text/html",
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "txt": "text/plain",
+                "rtf": "application/rtf",
+                "epub": "application/epub+zip",
+                "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "csv": "text/csv",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            }
+
+            if export_format:
+                export_format = export_format.lower()
+                export_mime_type = format_to_mime.get(export_format)
+                if not export_mime_type:
+                    supported = ", ".join(format_to_mime.keys())
+                    raise ToolError(f"Unsupported export format '{export_format}'. Supported: {supported}")
+            else:
+                export_mime_type = default_export_formats.get(file["mimeType"], "application/pdf")
 
             # Add appropriate file extension based on export format
             extension_map = {
@@ -314,6 +341,11 @@ def download_file(service: Resource, file_id: str) -> Tuple[bytes, str]:
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+                "text/html": ".html",
+                "text/plain": ".txt",
+                "application/rtf": ".rtf",
+                "application/epub+zip": ".epub",
+                "text/csv": ".csv",
             }
 
             # Add extension if the file doesn't already have it

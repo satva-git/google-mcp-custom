@@ -89,6 +89,7 @@ class TestMCPServer:
                 "set_paragraph_style",
                 "insert_table",
                 "batch_update_document",
+                "export_document",
             }
             assert expected_tools <= tool_names
 
@@ -481,6 +482,119 @@ class TestDocumentFunctions:
             assert result.structured_content == mock_batch_update_response
 
         mock_batch.assert_called_once_with(mock_service, "test_doc_id_1", requests)
+
+    @patch("app.server._get_access_token")
+    @patch("app.server.get_client")
+    @patch("app.server.export_document")
+    async def test_export_document_as_html(
+        self,
+        mock_export,
+        mock_get_client,
+        mock_get_access_token,
+        mock_service,
+    ):
+        mock_get_access_token.return_value = "fake_token"
+        mock_get_client.return_value = mock_service
+        expected = {
+            "document_id": "test_doc_id_1",
+            "file_name": "Test Document.html",
+            "mime_type": "text/html",
+            "export_format": "html",
+            "content": "<html><body><p>Hello</p></body></html>",
+            "size_bytes": 38,
+        }
+        mock_export.return_value = expected
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                name="export_document",
+                arguments={
+                    "document_id": "test_doc_id_1",
+                    "export_format": "html",
+                },
+            )
+            assert result.structured_content == expected
+
+        mock_export.assert_called_once_with(mock_service, "test_doc_id_1", "html")
+
+    @patch("app.server._get_access_token")
+    @patch("app.server.get_client")
+    @patch("app.server.export_document")
+    async def test_export_document_as_pdf(
+        self,
+        mock_export,
+        mock_get_client,
+        mock_get_access_token,
+        mock_service,
+    ):
+        mock_get_access_token.return_value = "fake_token"
+        mock_get_client.return_value = mock_service
+        expected = {
+            "document_id": "test_doc_id_1",
+            "file_name": "Test Document.pdf",
+            "mime_type": "application/pdf",
+            "export_format": "pdf",
+            "content": "base64encodedcontent",
+            "size_bytes": 1024,
+        }
+        mock_export.return_value = expected
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                name="export_document",
+                arguments={
+                    "document_id": "test_doc_id_1",
+                    "export_format": "pdf",
+                },
+            )
+            assert result.structured_content == expected
+
+    @patch("app.server._get_access_token")
+    @patch("app.server.get_client")
+    @patch("app.server.export_document")
+    async def test_export_document_default_format(
+        self,
+        mock_export,
+        mock_get_client,
+        mock_get_access_token,
+        mock_service,
+    ):
+        mock_get_access_token.return_value = "fake_token"
+        mock_get_client.return_value = mock_service
+        mock_export.return_value = {"document_id": "test_doc_id_1"}
+
+        async with Client(mcp) as client:
+            await client.call_tool(
+                name="export_document",
+                arguments={"document_id": "test_doc_id_1"},
+            )
+
+        mock_export.assert_called_once_with(mock_service, "test_doc_id_1", "html")
+
+    @patch("app.server._get_access_token")
+    @patch("app.server.get_client")
+    @patch("app.server.export_document")
+    async def test_export_document_invalid_format(
+        self,
+        mock_export,
+        mock_get_client,
+        mock_get_access_token,
+        mock_service,
+    ):
+        mock_get_access_token.return_value = "fake_token"
+        mock_get_client.return_value = mock_service
+        mock_export.side_effect = ValueError("Unsupported export format 'bmp'. Supported: html, pdf, docx, txt, rtf, epub")
+
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool(
+                    name="export_document",
+                    arguments={
+                        "document_id": "test_doc_id_1",
+                        "export_format": "bmp",
+                    },
+                )
+            assert "Unsupported export format" in str(exc_info.value)
 
 
 class TestContentConversion:

@@ -10,6 +10,7 @@ An MCP server for Google Drive integration, providing comprehensive file and fol
 - Transfer file ownership to users within the same domain
 - Filter files by MIME type, name, modification time, and folder location
 - Full management of shared drives including creation, deletion, and renaming
+- Export Google Workspace files (Docs, Sheets, Slides) in multiple formats — HTML (with embedded images as base64), PDF, DOCX, XLSX, CSV, PPTX, TXT, RTF, EPUB
 
 ## Usage
 

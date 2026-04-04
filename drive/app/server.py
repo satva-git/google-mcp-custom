@@ -547,6 +547,53 @@ def update_shared_drive_tool(
 
 
 @mcp.tool(
+    name="export_file",
+    annotations={
+        "readOnlyHint": True,
+    },
+)
+def export_file_tool(
+    file_id: Annotated[str, Field(description="ID of the Google Workspace file to export")],
+    export_format: Annotated[
+        str,
+        Field(
+            description="Export format. For Google Docs: 'html' (preserves images as base64), 'pdf', 'docx', 'txt', 'rtf', 'epub'. For Sheets: 'xlsx', 'pdf', 'csv'. For Slides: 'pdf', 'pptx'. Defaults to 'html'.",
+            default="html",
+        ),
+    ] = "html",
+) -> dict:
+    """
+    Export a Google Workspace file (Docs, Sheets, Slides) in a specified format.
+    Exporting Google Docs as HTML preserves embedded images as base64 data URIs.
+    This is useful for downloading documents with all images intact.
+    """
+    try:
+        client = get_client(_get_access_token())
+        content_bytes, file_name = download_file(client, file_id, export_format=export_format)
+
+        # Text-based formats returned as string content
+        text_formats = {"html", "txt", "rtf", "csv"}
+        fmt = export_format.lower()
+        if fmt in text_formats:
+            content = content_bytes.decode("utf-8")
+        else:
+            import base64
+            content = base64.b64encode(content_bytes).decode("ascii")
+
+        return {
+            "file_id": file_id,
+            "file_name": file_name,
+            "export_format": fmt,
+            "content": content,
+            "size_bytes": len(content_bytes),
+        }
+    except HttpError as error:
+        raise ToolError(f"Failed to export file, HttpError: {error}")
+    except Exception as error:
+        raise ToolError(f"Unexpected ToolError: {error}")
+
+
+@mcp.tool(
     name="read_file",
 )
 def read_file_tool(
