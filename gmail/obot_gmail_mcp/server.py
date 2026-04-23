@@ -19,6 +19,7 @@ from .apis.labels import (
     update_label,
 )
 from .apis.messages import (
+    build_forward_message,
     create_message_data,
     fetch_email_or_draft,
     format_message_metadata,
@@ -544,7 +545,7 @@ async def send_email_tool(
 ) -> str:
     """
     Send an email from the user's Gmail account.
-    Do not attempt to forward or reply to emails using this tool.
+    To forward an existing Gmail message (optionally preserving its attachments), use `forward_email` instead.
     """
     access_token = _get_access_token()
     service = get_client(access_token)
@@ -564,6 +565,62 @@ async def send_email_tool(
             service.users().messages().send(userId="me", body=message_obj).execute()
         )
         return f"Message Id: {sent_message['id']} - Message sent successfully!"
+    except HttpError as err:
+        raise ToolError(str(err))
+    except Exception as err:
+        raise ToolError(str(err))
+
+
+@mcp.tool(
+    name="forward_email",
+)
+def forward_email_tool(
+    message_id: Annotated[
+        str,
+        Field(description="The Gmail message ID of the email to forward."),
+    ],
+    to_emails: Annotated[
+        str,
+        Field(description="Comma-separated list of email addresses to forward the email to."),
+    ],
+    cc_emails: Annotated[
+        str | None,
+        Field(description="Comma-separated list of email addresses to cc (Optional).", default=None),
+    ] = None,
+    bcc_emails: Annotated[
+        str | None,
+        Field(description="Comma-separated list of email addresses to bcc (Optional).", default=None),
+    ] = None,
+    additional_message: Annotated[
+        str | None,
+        Field(description="Optional note from the sender, prepended above the forwarded message body.", default=None),
+    ] = None,
+    include_attachments: Annotated[
+        bool,
+        Field(description="If True (default), preserve the original message's attachments in the forwarded email. Set False to forward without attachments.", default=True),
+    ] = True,
+) -> str:
+    """
+    Forward an existing Gmail message to new recipients.
+    Preserves the original message's attachments (e.g. receipts, PDFs) when include_attachments=True.
+    Gmail's send limit is ~25 MB total — forwards with very large attachments will fail.
+    """
+    access_token = _get_access_token()
+    service = get_client(access_token)
+    try:
+        message_obj = build_forward_message(
+            service=service,
+            source_message_id=message_id,
+            to=to_emails,
+            cc=cc_emails,
+            bcc=bcc_emails,
+            additional_message=additional_message,
+            include_attachments=include_attachments,
+        )
+        sent_message = (
+            service.users().messages().send(userId="me", body=message_obj).execute()
+        )
+        return f"Message Id: {sent_message['id']} - Message forwarded successfully!"
     except HttpError as err:
         raise ToolError(str(err))
     except Exception as err:
