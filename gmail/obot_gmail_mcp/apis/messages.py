@@ -1,5 +1,7 @@
 import base64
 from datetime import datetime
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
@@ -451,3 +453,121 @@ def get_email_body(message):
             return decoded_body
     except Exception as e:
         raise Exception(f"Error while decoding the email body: {e}")
+
+
+def _collect_attachments(service, source_message_id, payload):
+    """Walk MIME tree and fetch all attachment bytes via the Gmail API.
+
+    Returns list of (filename, mime_type, bytes) tuples.
+    """
+    collected = []
+
+    def walk(parts):
+        for part in parts:
+            nested = part.get("parts")
+            if nested:
+                walk(nested)
+                continue
+            filename = part.get("filename")
+            body = part.get("body") or {}
+            attachment_id = body.get("attachmentId")
+            if filename and attachment_id:
+                att = (
+                    service.users()
+                    .messages()
+                    .attachments()
+                    .get(userId="me", messageId=source_message_id, id=attachment_id)
+                    .execute()
+                )
+                data = att.get("data", "")
+                try:
+                    file_bytes = base64.urlsafe_b64decode(data)
+                except Exception:
+                    file_bytes = b""
+                collected.append((filename, part.get("mimeType", "application/octet-stream"), file_bytes))
+
+    top_parts = payload.get("parts") or []
+    if top_parts:
+        walk(top_parts)
+    return collected
+
+
+def build_forward_message(
+    service,
+    source_message_id: str,
+    to: str,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    additional_message: Optional[str] = None,
+    include_attachments: bool = True,
+) -> dict:
+    """Build a Gmail API send body that forwards an existing message.
+
+    Fetches the source message, prepends a Gmail-style forwarded-message header,
+    carries over the original body, and (if requested) re-attaches the original
+    attachments. Returns {"raw": <base64url>, "threadId": <id>} ready for
+    service.users().messages().send(body=...).
+    """
+    source = (
+        service.users()
+        .messages()
+        .get(userId="me", id=source_message_id, format="full")
+        .execute()
+    )
+    payload = source.get("payload", {})
+    thread_id = source.get("threadId")
+    headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+
+    original_from = headers.get("From", "")
+    original_date = headers.get("Date", "")
+    original_subject = headers.get("Subject", "")
+    original_to = headers.get("To", "")
+
+    subject = original_subject if original_subject.lower().startswith("fwd:") else f"Fwd: {original_subject}"
+
+    original_body_html = extract_email_body(payload) or ""
+    soup = BeautifulSoup(original_body_html, "html.parser")
+    quoted_body = soup.prettify() if original_body_html else ""
+
+    note_html = (
+        f"<div>{additional_message.replace(chr(10), '<br>')}</div><br>"
+        if additional_message
+        else ""
+    )
+    forwarded_block = (
+        "<br><br>---------- Forwarded message ---------<br>"
+        f"<b>From:</b> {original_from}<br>"
+        f"<b>Date:</b> {original_date}<br>"
+        f"<b>Subject:</b> {original_subject}<br>"
+        f"<b>To:</b> {original_to}<br><br>"
+        f"{quoted_body}"
+    )
+    body_html = f"{note_html}{forwarded_block}"
+
+    message = MIMEMultipart()
+    message["to"] = to
+    if cc:
+        message["cc"] = cc
+    if bcc:
+        message["bcc"] = bcc
+    message["subject"] = subject
+    message["References"] = headers.get("References", "") or headers.get("Message-ID", "")
+    message["In-Reply-To"] = headers.get("Message-ID", "")
+    message.attach(MIMEText(body_html, "html"))
+
+    if include_attachments:
+        for filename, mime_type, file_bytes in _collect_attachments(service, source_message_id, payload):
+            main_type, _, sub_type = mime_type.partition("/")
+            if not main_type or not sub_type:
+                main_type, sub_type = "application", "octet-stream"
+            part = MIMEBase(main_type, sub_type)
+            part.set_payload(file_bytes)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            message.attach(part)
+
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+    data = {"raw": raw_message}
+    if thread_id:
+        data["threadId"] = thread_id
+    return data
