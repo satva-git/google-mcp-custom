@@ -33,6 +33,7 @@ services:
       OAUTH_AUTHORIZE_URL: "https://accounts.google.com"
       OAUTH_JWKS_URL: "https://accounts.google.com/.well-known/openid-configuration/jwks"
       MCP_SERVER_URL: "http://app:9000"
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       - postgres_oauth
       - app
