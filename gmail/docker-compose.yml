@@ -8,8 +8,10 @@ services:
     environment:
       PORT: 9000
       # mcp-oauth-proxy strips the /mcp resource prefix before forwarding,
-      # so the app must serve at /gmail (not /mcp/gmail) to receive requests.
-      MCP_PATH: /gmail
+      # so the app must serve at /gmail/ to receive requests. Trailing slash
+      # matters: Starlette Mount would 307-redirect /gmail -> /gmail/ otherwise
+      # and the 'Location' header leaks the internal Docker hostname (app:9000).
+      MCP_PATH: /gmail/
     expose:
       - "9000"
 
