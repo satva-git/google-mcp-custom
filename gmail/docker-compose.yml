@@ -36,8 +36,8 @@ services:
     depends_on:
       - postgres_oauth
       - app
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
 
 volumes:
   postgres_data:
