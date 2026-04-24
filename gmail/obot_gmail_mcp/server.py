@@ -49,13 +49,17 @@ async def health_check(request: Request):
 
 
 def _get_access_token() -> str:
-    headers = get_http_headers()
-    access_token = headers.get("x-forwarded-access-token", None)
-    if not access_token:
-        raise ToolError(
-            "No access token found in headers, available headers: " + str(headers)
-        )
-    return access_token
+    # include_all=True so the default fastmcp filter doesn't strip `authorization`.
+    headers = get_http_headers(include_all=True)
+    auth_header = headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    access_token = headers.get("x-forwarded-access-token")
+    if access_token:
+        return access_token
+    raise ToolError(
+        "No access token found in headers, available headers: " + str(list(headers.keys()))
+    )
 
 
 @mcp.tool(
