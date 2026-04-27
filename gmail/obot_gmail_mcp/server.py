@@ -1,6 +1,10 @@
+import base64
+import mimetypes
 import os
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from urllib.parse import unquote, urlparse
 
+import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
@@ -42,18 +46,25 @@ mcp = FastMCP(
     on_duplicate_prompts="replace",
     instructions="""Gmail MCP server for reading, composing, sending, and forwarding email.
 
-## Attaching files to NEW emails — NOT YET SUPPORTED
-`send_email`, `create_draft`, and `update_draft` send TEXT-ONLY bodies. They do not
-accept any file/attachment input — the underlying call passes `attachments=[]`
-unconditionally (workspace integration pending). To share a file with a recipient,
-either:
-  - Upload it to Google Drive (use the Drive MCP `upload_file` tool, then
-    `create_permission` for link sharing) and paste the share URL into the email body, OR
-  - Use `forward_email` on an existing message that already has the attachment
-    (set `include_attachments=True` to preserve the original attachments).
+## Attaching files to NEW emails
+`send_email`, `create_draft`, and `update_draft` accept an `attachments` parameter:
+a list of dicts shaped `{"name": "...", "content_b64": "<base64>", "content_type": "..."}`.
+Total message size (including headers and base64 overhead) must stay under Gmail's
+~25 MB send limit.
 
+Two ways to build the attachments list:
+  1. From a URL: call `attach_file_from_url(url=...)` — it fetches the URL and returns
+     `{"name", "content_b64", "content_type"}` ready to be spread into `attachments`.
+  2. Provide your own dict directly with the three fields.
+
+Example flow:
+    a = attach_file_from_url(url="https://example.com/report.pdf")
+    send_email(to_emails="x@y.com", subject="...", message="...", attachments=[a])
+
+## Forwarding existing mail
 `forward_email`'s `include_attachments` flag preserves the *source* message's
-attachments — it does not let you attach NEW files of your own.
+attachments. To add a NEW file to a forward, send a fresh email with `send_email`
+and the `attachments` parameter instead.
 
 ## Reading attachments on incoming mail
 - `list_attachments` lists attachments on a given email_id.
@@ -390,20 +401,32 @@ async def create_draft_tool(
     reply_all: Annotated[
         bool | str, Field(description="Whether to reply to all", default=False)
     ] = False,
-    # attachments: Annotated[list[str], Field(description="List of workspace file paths to attach to the email (Optional)")] = None, # not supported yet till workspace is implemented
+    attachments: Annotated[
+        Optional[List[Dict[str, str]]],
+        Field(
+            description=(
+                "Optional list of attachments. Each item is a dict with keys: "
+                "`name` (filename shown to recipient), `content_b64` (file bytes "
+                "as standard base64), `content_type` (MIME type, e.g. "
+                "'application/pdf'). Build entries via `attach_file_from_url` "
+                "or construct them directly. Gmail send limit is ~25 MB total."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> str:
     """
     Create a draft email in the user's Gmail account.
 
-    Attachments: NOT SUPPORTED — drafts created here are text-only. To include a
-    file, upload it via the Drive MCP `upload_file` tool, share it with
-    `create_permission` (role=reader, type=anyone), and paste the link into
-    `message`.
+    Attachments: pass an `attachments` list. Each item must be
+    `{"name": "report.pdf", "content_b64": "<base64>", "content_type": "application/pdf"}`.
+    The two-step flow:
+        a = attach_file_from_url(url="https://.../report.pdf")
+        create_draft(to_emails="x@y.com", subject="...", message="...", attachments=[a])
     """
     access_token = _get_access_token()
     service = get_client(access_token)
     reply_all = _parse_str_to_bool(reply_all) if isinstance(reply_all, str) else reply_all
-    # att_list = [a.strip() for a in attachments if a.strip()]
     try:
         draft_obj = await create_message_data(
             service=service,
@@ -412,8 +435,7 @@ async def create_draft_tool(
             bcc=bcc_emails,
             subject=subject,
             message_text=message,
-            # attachments=att_list,
-            attachments=[],
+            attachments=attachments or [],
             reply_to_email_id=reply_to_email_id,
             reply_all=reply_all,
         )
@@ -569,20 +591,35 @@ async def send_email_tool(
             default=None
         ),
     ] = None,
-    # attachments: Annotated[list[str], Field(description="List of workspace file paths to attach to the email (Optional)")] = None, # not supported yet till workspace is implemented
+    attachments: Annotated[
+        Optional[List[Dict[str, str]]],
+        Field(
+            description=(
+                "Optional list of attachments. Each item is a dict with keys: "
+                "`name` (filename shown to recipient), `content_b64` (file bytes "
+                "as standard base64), `content_type` (MIME type, e.g. "
+                "'application/pdf'). Build entries via `attach_file_from_url` or "
+                "construct them directly. Gmail send limit is ~25 MB total."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> str:
     """
     Send an email from the user's Gmail account.
 
-    Attachments: NOT SUPPORTED by this tool — body is text-only. To share a file
-    with the recipient, upload it via the Drive MCP `upload_file` tool, make it
-    link-shareable with `create_permission` (role=reader, type=anyone), and paste
-    the resulting URL into `message`. To forward an existing Gmail message
-    (optionally preserving its original attachments), use `forward_email`.
+    Attachments: pass an `attachments` list. Each item must be
+    `{"name": "report.pdf", "content_b64": "<base64>", "content_type": "application/pdf"}`.
+
+    Two-step example:
+        a = attach_file_from_url(url="https://example.com/report.pdf")
+        send_email(to_emails="x@y.com", subject="Report", message="See attached.", attachments=[a])
+
+    To forward an existing Gmail message (and optionally preserve its existing
+    attachments), use `forward_email` instead.
     """
     access_token = _get_access_token()
     service = get_client(access_token)
-    # att_list = [a.strip() for a in attachments if a.strip()] if attachments else []
     try:
         message_obj = await create_message_data(
             service=service,
@@ -591,8 +628,7 @@ async def send_email_tool(
             bcc=bcc_emails,
             subject=subject,
             message_text=message,
-            # attachments=att_list,
-            attachments=[],
+            attachments=attachments or [],
         )
         sent_message = (
             service.users().messages().send(userId="me", body=message_obj).execute()
@@ -698,20 +734,33 @@ async def update_draft_tool(
     reply_all: Annotated[
         bool | str, Field(description="Whether to reply to all", default=False)
     ] = False,
-    # attachments: Annotated[list[str], Field(description="List of workspace file paths to attach to the email (Optional)")] = None, # not supported yet till workspace is implemented
+    attachments: Annotated[
+        Optional[List[Dict[str, str]]],
+        Field(
+            description=(
+                "Optional list of attachments. Each item is a dict with keys: "
+                "`name` (filename), `content_b64` (standard base64 of bytes), "
+                "`content_type` (MIME type). Replaces the draft's previous "
+                "attachments — pass the full list each time. Build entries via "
+                "`attach_file_from_url` or construct directly."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> str:
     """
     Update a draft email in the user's Gmail account.
 
-    Attachments: NOT SUPPORTED — updates apply to text fields only. To include a
-    file, upload it via the Drive MCP `upload_file` tool, share with
-    `create_permission` (role=reader, type=anyone), and paste the link into
-    `message`.
+    Attachments: pass an `attachments` list of
+    `{"name", "content_b64", "content_type"}` dicts. The two-step flow:
+        a = attach_file_from_url(url="https://.../file.pdf")
+        update_draft(draft_id="...", to_emails="...", subject="...", message="...", attachments=[a])
+    Note: the Gmail draft is fully replaced on update — include every attachment
+    you want to keep.
     """
     access_token = _get_access_token()
     service = get_client(access_token)
     reply_all = _parse_str_to_bool(reply_all) if isinstance(reply_all, str) else reply_all
-    # att_list = [a.strip() for a in attachments if a.strip()] if attachments else []
     try:
         draft_response = await update_draft(
             service=service,
@@ -721,8 +770,7 @@ async def update_draft_tool(
             bcc=bcc_emails,
             subject=subject,
             body=message,
-            # attachments=att_list,
-            attachments=[],
+            attachments=attachments or [],
             reply_to_email_id=reply_to_email_id,
             reply_all=reply_all,
         )
@@ -769,6 +817,74 @@ def list_attachments_tool(
 # TODO: tools to add:
 # - read_attachment: need supports of something like a gptscript knowledge tool
 # - download_attachment: need to support downloading attachments to the workspace
+
+
+@mcp.tool(
+    name="attach_file_from_url",
+    annotations={"readOnlyHint": True, "destructiveHint": False},
+)
+async def attach_file_from_url_tool(
+    url: Annotated[
+        str,
+        Field(description="HTTP(S) URL to fetch. Redirects are followed."),
+    ],
+    name: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Filename to use in the email. If not provided, derived from the "
+                "URL path basename."
+            ),
+            default=None,
+        ),
+    ] = None,
+    content_type: Annotated[
+        str | None,
+        Field(
+            description=(
+                "MIME type override. If not provided, taken from the response "
+                "Content-Type header, falling back to a guess from filename."
+            ),
+            default=None,
+        ),
+    ] = None,
+) -> Dict[str, str]:
+    """
+    Fetch a file from a URL and return an attachment dict ready to be passed
+    into `send_email(attachments=[...])`, `create_draft`, or `update_draft`.
+
+    Returns: {"name": "...", "content_b64": "<base64>", "content_type": "..."}.
+
+    Two-step example:
+        a = attach_file_from_url(url="https://example.com/report.pdf")
+        send_email(to_emails="x@y.com", subject="Report", message="See attached.", attachments=[a])
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.content
+            resp_ct = (resp.headers.get("Content-Type") or "").split(";", 1)[0].strip()
+    except httpx.HTTPError as e:
+        raise ToolError(f"Failed to fetch URL '{url}': {e}")
+
+    # Derive filename
+    if not name:
+        path = urlparse(url).path or ""
+        base = unquote(path.rsplit("/", 1)[-1]) if path else ""
+        name = base or "attachment"
+
+    # Derive content type
+    final_ct = content_type or resp_ct or ""
+    if not final_ct:
+        guessed, _ = mimetypes.guess_type(name)
+        final_ct = guessed or "application/octet-stream"
+
+    return {
+        "name": name,
+        "content_b64": base64.b64encode(data).decode("ascii"),
+        "content_type": final_ct,
+    }
 
 
 def streamable_http_server():

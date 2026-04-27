@@ -1,7 +1,10 @@
 import base64
 from datetime import datetime
 from email import encoders
+from email.mime.application import MIMEApplication
+from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
@@ -170,6 +173,45 @@ def get_thread_with_message_id(service, message_id: str):
         raise ValueError(f"No thread found for message {message_id}")
 
 
+def _attach_user_files(message, attachments):
+    """Attach a list of user-supplied attachments to a MIME message.
+
+    Each attachment is a dict: {"name", "content_b64", "content_type"}.
+    """
+    if not attachments:
+        return
+    for att in attachments:
+        try:
+            name = att.get("name") or "attachment"
+            content_b64 = att.get("content_b64") or ""
+            content_type = (att.get("content_type") or "application/octet-stream").strip()
+            try:
+                file_bytes = base64.b64decode(content_b64)
+            except Exception:
+                # tolerate URL-safe base64 too
+                file_bytes = base64.urlsafe_b64decode(content_b64)
+
+            main_type, _, sub_type = content_type.partition("/")
+            if not main_type or not sub_type:
+                main_type, sub_type = "application", "octet-stream"
+
+            if main_type == "image":
+                part = MIMEImage(file_bytes, _subtype=sub_type)
+            elif main_type == "audio":
+                part = MIMEAudio(file_bytes, _subtype=sub_type)
+            elif main_type == "application":
+                part = MIMEApplication(file_bytes, _subtype=sub_type)
+            else:
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(file_bytes)
+                encoders.encode_base64(part)
+
+            part.add_header("Content-Disposition", f'attachment; filename="{name}"')
+            message.attach(part)
+        except Exception as e:
+            raise Exception(f"Error attaching '{att.get('name', '<unknown>')}': {e}")
+
+
 async def create_message_data(
     service,
     to,
@@ -181,7 +223,8 @@ async def create_message_data(
     reply_to_email_id=None,
     reply_all=False,
 ):
-    message = MIMEMultipart()
+    # Use multipart/mixed when there are attachments, else default (mixed still OK).
+    message = MIMEMultipart("mixed") if attachments else MIMEMultipart()
     message_text_html = message_text.replace("\n", "<br>")
     message.attach(MIMEText(message_text_html, "html"))
 
@@ -220,8 +263,10 @@ async def create_message_data(
     if bcc is not None:
         message["bcc"] = bcc
 
-    # Read and attach any workspace files if provided
-    # TODO: Commented out for now, will get this back in once we have a workspace solution
+    # Attach any user-supplied attachments (list of dicts with name/content_b64/content_type)
+    _attach_user_files(message, attachments)
+
+    # Legacy workspace-path support kept commented for future workspace integration.
     # for filepath in attachments:
     #     try:
     #         # Get the file bytes from the workspace

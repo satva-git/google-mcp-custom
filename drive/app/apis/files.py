@@ -181,6 +181,42 @@ def create_file(
         raise ToolError(f"Failed to create file, HttpError: {error_details}")
 
 
+def upload_file(
+    service: Resource,
+    name: str,
+    file_content: bytes,
+    mime_type: str,
+    parent_id: Optional[str] = None,
+    description: Optional[str] = None,
+) -> dict:
+    """
+    Upload bytes as a NEW file in Google Drive. Uses a resumable upload (suitable
+    for files >5MB). Returns dict with id, name, mimeType, parents, webViewLink,
+    webContentLink.
+    """
+    try:
+        file_metadata: dict = {"name": name, "mimeType": mime_type}
+        if parent_id:
+            file_metadata["parents"] = [parent_id]
+        if description:
+            file_metadata["description"] = description
+
+        media = _prepare_media_upload(file_content, mime_type)
+        return (
+            service.files()
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields="id, name, mimeType, parents, webViewLink, webContentLink, size",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+    except HttpError as error:
+        error_details = error.error_details[0] if error.error_details else {}
+        raise ToolError(f"Failed to upload file, HttpError: {error_details}")
+
+
 def delete_file(service: Resource, file_id: str) -> bool:
     """
     Delete a file from Google Drive.

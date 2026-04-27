@@ -5,17 +5,24 @@ from .apis.files import list_files
 from fastmcp import FastMCP
 from pydantic import Field
 from typing import Annotated, Literal
+import base64
+import mimetypes
 import os
+from urllib.parse import unquote, urlparse
+
+import httpx
 
 
 # Import all the command functions
 from .apis.files import (
     copy_file,
+    create_file,
     get_file,
     update_file,
     delete_file,
     create_folder,
     download_file,
+    upload_file,
 )
 from .apis.permissions import (
     list_permissions,
@@ -46,15 +53,22 @@ mcp = FastMCP(
     on_duplicate_prompts="replace",
     instructions="""Google Drive MCP server for file/folder management, sharing, and content reading.
 
-## Uploading new files — CAPABILITY GAP
-This server does NOT currently expose an `upload_file` / `create_file` tool. You can:
+## Uploading new files
+Two upload tools are available to create a NEW Drive file from bytes:
+  - `upload_file_from_b64(name, content_b64, content_type, parent_id?, description?)`
+    — for content already in base64 (e.g. produced by another tool).
+  - `upload_file_from_url(url, name?, content_type?, parent_id?, description?)`
+    — fetches the URL and uploads in one step.
+Both use resumable uploads and return `{file_id, web_view_link, web_content_link}`.
+
+To then share the uploaded file via link, call:
+    create_permission(file_id=<id>, role="reader", type="anyone")
+
+Other file operations:
   - Create empty FOLDERS via `create_folder`.
   - Copy existing Drive files via `copy_file`.
   - Update metadata (name, parent) of existing files via `update_file`.
   - Read/export existing file contents via `read_file` / `export_file`.
-But you cannot push raw bytes / a local path / a URL to materialize a NEW Drive file.
-Until an upload tool is added, the user must upload via the Drive web UI; afterward
-this server can manage the resulting file_id.
 
 ## Sharing a file as a link (so a recipient can view it)
 Once a file exists in Drive, make it shareable:
@@ -653,6 +667,176 @@ def read_file_tool(
             return md.convert(BytesIO(content))
     except HttpError as error:
         raise ToolError(f"Failed to read file, HttpError: {error}")
+    except Exception as error:
+        raise ToolError(f"Unexpected ToolError: {error}")
+
+
+def _upload_response(file_obj: dict) -> dict:
+    """Normalize Drive create() response to the documented shape."""
+    return {
+        "file_id": file_obj.get("id"),
+        "name": file_obj.get("name"),
+        "mime_type": file_obj.get("mimeType"),
+        "parents": file_obj.get("parents", []),
+        "size": file_obj.get("size"),
+        "web_view_link": file_obj.get("webViewLink"),
+        "web_content_link": file_obj.get("webContentLink"),
+    }
+
+
+@mcp.tool(
+    name="upload_file_from_b64",
+)
+def upload_file_from_b64_tool(
+    name: Annotated[
+        str,
+        Field(description="Filename for the new Drive file (e.g. 'report.pdf')."),
+    ],
+    content_b64: Annotated[
+        str,
+        Field(description="File bytes, encoded as standard base64."),
+    ],
+    content_type: Annotated[
+        str,
+        Field(
+            description=(
+                "MIME type of the file (e.g. 'application/pdf', 'image/png'). "
+                "If you want to convert into a Google Doc, pass "
+                "'application/vnd.google-apps.document' — Drive will convert."
+            ),
+        ),
+    ],
+    parent_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional ID of the parent folder. Defaults to the root of the "
+                "user's My Drive."
+            ),
+            default=None,
+        ),
+    ] = None,
+    description: Annotated[
+        str | None,
+        Field(description="Optional description stored on the Drive file.", default=None),
+    ] = None,
+) -> dict:
+    """
+    Upload bytes (provided as base64) to create a new file in the user's Google Drive.
+    Uses a resumable upload, suitable for files larger than 5 MB.
+
+    Returns: `{file_id, name, mime_type, parents, size, web_view_link, web_content_link}`.
+
+    To then share this file via link, call
+    `create_permission(file_id=<file_id>, role="reader", type="anyone")`.
+    """
+    try:
+        try:
+            file_bytes = base64.b64decode(content_b64)
+        except Exception:
+            file_bytes = base64.urlsafe_b64decode(content_b64)
+        client = get_client(_get_access_token())
+        result = upload_file(
+            client,
+            name=name,
+            file_content=file_bytes,
+            mime_type=content_type,
+            parent_id=parent_id,
+            description=description,
+        )
+        return _upload_response(result or {})
+    except HttpError as error:
+        raise ToolError(f"Failed to upload file, HttpError: {error}")
+    except ToolError:
+        raise
+    except Exception as error:
+        raise ToolError(f"Unexpected ToolError: {error}")
+
+
+@mcp.tool(
+    name="upload_file_from_url",
+)
+async def upload_file_from_url_tool(
+    url: Annotated[
+        str,
+        Field(description="HTTP(S) URL of the file to fetch. Redirects are followed."),
+    ],
+    name: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Filename to use in Drive. If not provided, derived from the URL "
+                "path basename (URL-decoded)."
+            ),
+            default=None,
+        ),
+    ] = None,
+    content_type: Annotated[
+        str | None,
+        Field(
+            description=(
+                "MIME type override. If not provided, taken from the response "
+                "Content-Type header, falling back to a guess from filename."
+            ),
+            default=None,
+        ),
+    ] = None,
+    parent_id: Annotated[
+        str | None,
+        Field(
+            description="Optional ID of the parent folder.",
+            default=None,
+        ),
+    ] = None,
+    description: Annotated[
+        str | None,
+        Field(description="Optional description stored on the Drive file.", default=None),
+    ] = None,
+) -> dict:
+    """
+    Fetch a file from a URL and upload it as a new file in the user's Google Drive.
+    Uses a resumable upload.
+
+    Returns: `{file_id, name, mime_type, parents, size, web_view_link, web_content_link}`.
+
+    To then share this file via link, call
+    `create_permission(file_id=<file_id>, role="reader", type="anyone")`.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as http_client:
+            resp = await http_client.get(url)
+            resp.raise_for_status()
+            data = resp.content
+            resp_ct = (resp.headers.get("Content-Type") or "").split(";", 1)[0].strip()
+    except httpx.HTTPError as e:
+        raise ToolError(f"Failed to fetch URL '{url}': {e}")
+
+    final_name = name
+    if not final_name:
+        path = urlparse(url).path or ""
+        base = unquote(path.rsplit("/", 1)[-1]) if path else ""
+        final_name = base or "uploaded_file"
+
+    final_ct = content_type or resp_ct or ""
+    if not final_ct:
+        guessed, _ = mimetypes.guess_type(final_name)
+        final_ct = guessed or "application/octet-stream"
+
+    try:
+        client = get_client(_get_access_token())
+        result = upload_file(
+            client,
+            name=final_name,
+            file_content=data,
+            mime_type=final_ct,
+            parent_id=parent_id,
+            description=description,
+        )
+        return _upload_response(result or {})
+    except HttpError as error:
+        raise ToolError(f"Failed to upload file, HttpError: {error}")
+    except ToolError:
+        raise
     except Exception as error:
         raise ToolError(f"Unexpected ToolError: {error}")
 
