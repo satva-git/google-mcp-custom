@@ -40,6 +40,25 @@ mcp = FastMCP(
     on_duplicate_tools="error",  # Handle duplicate registrations
     on_duplicate_resources="warn",
     on_duplicate_prompts="replace",
+    instructions="""Gmail MCP server for reading, composing, sending, and forwarding email.
+
+## Attaching files to NEW emails — NOT YET SUPPORTED
+`send_email`, `create_draft`, and `update_draft` send TEXT-ONLY bodies. They do not
+accept any file/attachment input — the underlying call passes `attachments=[]`
+unconditionally (workspace integration pending). To share a file with a recipient,
+either:
+  - Upload it to Google Drive (use the Drive MCP `upload_file` tool, then
+    `create_permission` for link sharing) and paste the share URL into the email body, OR
+  - Use `forward_email` on an existing message that already has the attachment
+    (set `include_attachments=True` to preserve the original attachments).
+
+`forward_email`'s `include_attachments` flag preserves the *source* message's
+attachments — it does not let you attach NEW files of your own.
+
+## Reading attachments on incoming mail
+- `list_attachments` lists attachments on a given email_id.
+- `read_email` reports `has_attachment` and a Gmail link to view the message.
+""",
 )
 
 
@@ -375,6 +394,11 @@ async def create_draft_tool(
 ) -> str:
     """
     Create a draft email in the user's Gmail account.
+
+    Attachments: NOT SUPPORTED — drafts created here are text-only. To include a
+    file, upload it via the Drive MCP `upload_file` tool, share it with
+    `create_permission` (role=reader, type=anyone), and paste the link into
+    `message`.
     """
     access_token = _get_access_token()
     service = get_client(access_token)
@@ -549,7 +573,12 @@ async def send_email_tool(
 ) -> str:
     """
     Send an email from the user's Gmail account.
-    To forward an existing Gmail message (optionally preserving its attachments), use `forward_email` instead.
+
+    Attachments: NOT SUPPORTED by this tool — body is text-only. To share a file
+    with the recipient, upload it via the Drive MCP `upload_file` tool, make it
+    link-shareable with `create_permission` (role=reader, type=anyone), and paste
+    the resulting URL into `message`. To forward an existing Gmail message
+    (optionally preserving its original attachments), use `forward_email`.
     """
     access_token = _get_access_token()
     service = get_client(access_token)
@@ -606,7 +635,12 @@ def forward_email_tool(
 ) -> str:
     """
     Forward an existing Gmail message to new recipients.
-    Preserves the original message's attachments (e.g. receipts, PDFs) when include_attachments=True.
+
+    `include_attachments=True` preserves the SOURCE message's existing attachments
+    (e.g. receipts, PDFs). It does NOT let you attach new files of your own —
+    that capability is not yet implemented in this server. To add a new file,
+    upload via Drive MCP and link it inside `additional_message`.
+
     Gmail's send limit is ~25 MB total — forwards with very large attachments will fail.
     """
     access_token = _get_access_token()
@@ -668,6 +702,11 @@ async def update_draft_tool(
 ) -> str:
     """
     Update a draft email in the user's Gmail account.
+
+    Attachments: NOT SUPPORTED — updates apply to text fields only. To include a
+    file, upload it via the Drive MCP `upload_file` tool, share with
+    `create_permission` (role=reader, type=anyone), and paste the link into
+    `message`.
     """
     access_token = _get_access_token()
     service = get_client(access_token)

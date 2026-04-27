@@ -44,6 +44,30 @@ mcp = FastMCP(
     on_duplicate_tools="error",  # Handle duplicate registrations
     on_duplicate_resources="warn",
     on_duplicate_prompts="replace",
+    instructions="""Google Drive MCP server for file/folder management, sharing, and content reading.
+
+## Uploading new files — CAPABILITY GAP
+This server does NOT currently expose an `upload_file` / `create_file` tool. You can:
+  - Create empty FOLDERS via `create_folder`.
+  - Copy existing Drive files via `copy_file`.
+  - Update metadata (name, parent) of existing files via `update_file`.
+  - Read/export existing file contents via `read_file` / `export_file`.
+But you cannot push raw bytes / a local path / a URL to materialize a NEW Drive file.
+Until an upload tool is added, the user must upload via the Drive web UI; afterward
+this server can manage the resulting file_id.
+
+## Sharing a file as a link (so a recipient can view it)
+Once a file exists in Drive, make it shareable:
+  1. Call `create_permission(file_id=<id>, role="reader", type="anyone")` for anyone-with-link access.
+     Use `role="writer"` / `"commenter"` for stronger access; use `type="user"` + `email_address`
+     to share with a specific person.
+  2. Use `get_file(file_id)` to retrieve the `webViewLink` (or construct
+     `https://drive.google.com/file/d/<file_id>/view`) and paste it into your email/message body.
+
+This Drive-link flow is the supported way to "attach" a file to a Gmail send_email or
+to a Basecamp message body when you want the recipient to view content rather than
+embed it inline.
+""",
 )
 
 
@@ -384,6 +408,17 @@ def create_permission_tool(
 ) -> dict:
     """
     Create a new permission for a Google Drive file, folder, or shared drive.
+
+    Common patterns:
+      - Anyone-with-link can view: role="reader", type="anyone".
+      - Anyone-with-link can edit: role="writer", type="anyone".
+      - Share with one person: role="reader"|"writer"|"commenter", type="user", email_address="...".
+      - Share with a Google Group: type="group", email_address="group@domain".
+      - Share with a domain: type="domain", domain="example.com".
+
+    To share a Drive file in a Gmail message or Basecamp post, call this with
+    type="anyone" + role="reader" first, then paste the file's webViewLink
+    (from get_file) into the message body.
     """
     try:
         client = get_client(_get_access_token())
