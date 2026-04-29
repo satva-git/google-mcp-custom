@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: 9000
+      # mcp-oauth-proxy strips the /mcp resource prefix before forwarding,
+      # so the app must serve at /google-slides/ to receive requests. Trailing
+      # slash matters: Starlette Mount would 307-redirect /google-slides ->
+      # /google-slides/ otherwise and the 'Location' header leaks the internal
+      # Docker hostname (app:9000).
+      MCP_PATH: /google-slides/
+    expose:
+      - "9000"
+
+  postgres_oauth:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: oauth_proxy
+      POSTGRES_USER: oauth_user
+      POSTGRES_PASSWORD: oauth_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+
+  oauth-proxy:
+    image: ghcr.io/obot-platform/mcp-oauth-proxy:master
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      DATABASE_DSN: "postgres://oauth_user:oauth_password@postgres_oauth:5432/oauth_proxy?sslmode=disable"
+      SCOPES_SUPPORTED: "openid,profile,email,https://www.googleapis.com/auth/presentations,https://www.googleapis.com/auth/drive"
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+      OAUTH_AUTHORIZE_URL: "https://accounts.google.com"
+      OAUTH_JWKS_URL: "https://accounts.google.com/.well-known/openid-configuration/jwks"
+      MCP_SERVER_URL: "http://app:9000"
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      - postgres_oauth
+      - app
+    expose:
+      - "8080"
+
+volumes:
+  postgres_data:
